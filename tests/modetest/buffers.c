@@ -32,6 +32,7 @@
 #include <string.h>
 #include <sys/ioctl.h>
 
+#include "../../include/drm/vc4_drm.h"
 #include "drm.h"
 #include "drm_fourcc.h"
 
@@ -57,7 +58,8 @@ struct bo
 static struct bo *
 bo_create_dumb(int fd, unsigned int width, unsigned int height, unsigned int bpp)
 {
-	struct drm_mode_create_dumb arg;
+	struct drm_vc4_set_tiling tiling = {};
+	struct drm_vc4_create_bo arg;
 	struct bo *bo;
 	int ret;
 
@@ -68,11 +70,11 @@ bo_create_dumb(int fd, unsigned int width, unsigned int height, unsigned int bpp
 	}
 
 	memset(&arg, 0, sizeof(arg));
-	arg.bpp = bpp;
-	arg.width = width;
-	arg.height = height;
+	width = (width + 31) & ~31;
+	height = (height + 31) & ~31;
+	arg.size = width * height * 4;
 
-	ret = drmIoctl(fd, DRM_IOCTL_MODE_CREATE_DUMB, &arg);
+	ret = drmIoctl(fd, DRM_IOCTL_VC4_CREATE_BO, &arg);
 	if (ret) {
 		fprintf(stderr, "failed to create dumb buffer: %s\n",
 			strerror(errno));
@@ -80,10 +82,21 @@ bo_create_dumb(int fd, unsigned int width, unsigned int height, unsigned int bpp
 		return NULL;
 	}
 
+	tiling.handle = arg.handle;
+	tiling.modifier = DRM_FORMAT_MOD_BROADCOM_VC4_T_TILED;
+	ret = drmIoctl(fd, DRM_IOCTL_VC4_SET_TILING, &tiling);
+	if (ret) {
+		fprintf(stderr, "failed to set tiling modifier: %s\n",
+			strerror(errno));
+		free(bo);
+		return NULL;
+	}
 	bo->fd = fd;
 	bo->handle = arg.handle;
 	bo->size = arg.size;
-	bo->pitch = arg.pitch;
+	bo->pitch = ((width / 32) * 4096) / 32;
+
+	printf("%s:%i width %d height %d, size %d, pitch %d\n", __func__, __LINE__, width, height, bo->size, bo->pitch);
 
 	return bo;
 }

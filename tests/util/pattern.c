@@ -396,6 +396,69 @@ static void fill_smpte_rgb24(const struct util_rgb_info *rgb, void *mem,
 	}
 }
 
+static void set_pix_val(void *mem, unsigned int x, unsigned int y,
+			unsigned int w, unsigned h, uint32_t val)
+{
+	unsigned int tile, subtile, utile, utile_offs, htile, wtile;
+	uint32_t *pix = mem;
+
+//	printf("%s:%i x %d y %d\n", __func__, __LINE__, x, y);
+//	y = h - y;
+	htile = (h + 31) / 32;
+	wtile = (w + 31) / 32;
+
+	tile = (y / 32) * wtile;
+	utile = (y % 16) & ~0x3;
+	utile_offs = (y % 4) * 4;
+	if ((y / 32) % 2) {
+//		x = w - x;
+//		tile += (((wtile * 32) - x - 1) / 32);
+		tile += wtile - (x / 32) - 1;
+
+		if ((x % 32) / 16 && (y % 32) / 16)
+			subtile = 0;
+		else if (!((x % 32) / 16) && !((y % 32) / 16))
+			subtile = 2;
+		else if (!((x % 32) / 16) && (y % 32) / 16)
+			subtile = 3;
+		else
+			subtile = 1;
+	} else {
+		tile += (x / 32);
+
+		if ((x % 32) / 16 && (y % 32) / 16)
+			subtile = 2;
+		else if (!((x % 32) / 16) && !((y % 32) / 16))
+			subtile = 0;
+		else if (!((x % 32) / 16) && (y % 32) / 16)
+			subtile = 1;
+		else
+			subtile = 3;
+	}
+
+	utile += (x % 16) / 4;
+	utile_offs += x % 4;
+
+	/*
+	if ((x % 32) / 16 && (y % 32) / 16)
+		subtile = 3;
+	else if (!((x % 32) / 16) && !((y % 32) / 16))
+		subtile = 1;
+	else if (!((x % 32) / 16) && (y % 32) / 16)
+		subtile = 0;
+	else
+		subtile = 2;
+	*/
+
+	/*
+	printf("%s:%i x %d y %d tile %d subtile %d utile %d utile_offs %d absoff %08x \n",
+	       __func__, __LINE__, x, y, tile, subtile, utile, utile_offs * 4,
+	       (tile * 4096) + (subtile * 1024) + (utile * 64) + (utile_offs * 4));
+	*/
+	pix = mem + ((tile * 4096) + (subtile * 1024) + (utile * 64) + (utile_offs * 4));
+	*pix = val;
+}
+
 static void fill_smpte_rgb32(const struct util_rgb_info *rgb, void *mem,
 			     unsigned int width, unsigned int height,
 			     unsigned int stride)
@@ -433,27 +496,26 @@ static void fill_smpte_rgb32(const struct util_rgb_info *rgb, void *mem,
 
 	for (y = 0; y < height * 6 / 9; ++y) {
 		for (x = 0; x < width; ++x)
-			((uint32_t *)mem)[x] = colors_top[x * 7 / width];
-		mem += stride;
+			set_pix_val(mem, x, y, width, height,
+				    colors_top[x * 7 / width]);
 	}
 
 	for (; y < height * 7 / 9; ++y) {
 		for (x = 0; x < width; ++x)
-			((uint32_t *)mem)[x] = colors_middle[x * 7 / width];
-		mem += stride;
+			set_pix_val(mem, x, y, width, height,
+				    colors_middle[x * 7 / width]);
 	}
 
 	for (; y < height; ++y) {
 		for (x = 0; x < width * 5 / 7; ++x)
-			((uint32_t *)mem)[x] =
-				colors_bottom[x * 4 / (width * 5 / 7)];
+			set_pix_val(mem, x, y, width, height,
+				    colors_bottom[x * 4 / (width * 5 / 7)]);
 		for (; x < width * 6 / 7; ++x)
-			((uint32_t *)mem)[x] =
-				colors_bottom[(x - width * 5 / 7) * 3
-					      / (width / 7) + 4];
+			set_pix_val(mem, x, y, width, height,
+				    colors_bottom[(x - width * 5 / 7) * 3 /
+						  (width / 7) + 4]);
 		for (; x < width; ++x)
-			((uint32_t *)mem)[x] = colors_bottom[7];
-		mem += stride;
+			set_pix_val(mem, x, y, width, height, colors_bottom[7]);
 	}
 }
 
@@ -547,6 +609,7 @@ static void make_pwetty(void *data, unsigned int width, unsigned int height,
 	cairo_t *cr;
 	cairo_format_t cairo_format;
 
+	return;
 	/* we can ignore the order of R,G,B channels */
 	switch (format) {
 	case DRM_FORMAT_XRGB8888:
@@ -734,9 +797,10 @@ static void fill_tiles_rgb32(const struct util_format_info *info, void *mem,
 					  (rgb32 >> 8) & 0xff, rgb32 & 0xff,
 					  alpha);
 
-			((uint32_t *)mem)[x] = color;
+			set_pix_val(mem, x, y, width, height, color);
+			//((uint32_t *)mem)[x] = color;
 		}
-		mem += stride;
+//		mem += stride;
 	}
 
 	make_pwetty(mem_base, width, height, stride, info->format);
