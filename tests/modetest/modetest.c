@@ -1057,6 +1057,7 @@ static int set_plane(struct device *dev, struct plane_arg *p)
 {
 	drmModePlane *ovr;
 	uint32_t handles[4] = {0}, pitches[4] = {0}, offsets[4] = {0};
+	uint64_t modifiers[4] = { };
 	uint32_t plane_id;
 	struct bo *plane_bo;
 	uint32_t plane_flags = 0;
@@ -1117,9 +1118,11 @@ static int set_plane(struct device *dev, struct plane_arg *p)
 
 	p->bo = plane_bo;
 
+	modifiers[1] = modifiers[0] = DRM_FORMAT_MOD_BROADCOM_SAND64_COL_HEIGHT(p->h);
 	/* just use single plane format for now.. */
-	if (drmModeAddFB2(dev->fd, p->w, p->h, p->fourcc,
-			handles, pitches, offsets, &p->fb_id, plane_flags)) {
+	if (drmModeAddFB2WithModifiers(dev->fd, p->w, p->h, p->fourcc,
+			handles, pitches, offsets, modifiers, &p->fb_id,
+			plane_flags | DRM_MODE_FB_MODIFIERS)) {
 		fprintf(stderr, "failed to add fb: %s\n", strerror(errno));
 		return -1;
 	}
@@ -1165,6 +1168,7 @@ static void clear_planes(struct device *dev, struct plane_arg *p, unsigned int c
 static void set_mode(struct device *dev, struct pipe_arg *pipes, unsigned int count)
 {
 	uint32_t handles[4] = {0}, pitches[4] = {0}, offsets[4] = {0};
+	uint64_t modifiers[4] = { };
 	unsigned int fb_id;
 	struct bo *bo;
 	unsigned int i;
@@ -1195,8 +1199,9 @@ static void set_mode(struct device *dev, struct pipe_arg *pipes, unsigned int co
 
 	dev->mode.bo = bo;
 
-	ret = drmModeAddFB2(dev->fd, dev->mode.width, dev->mode.height,
-			    pipes[0].fourcc, handles, pitches, offsets, &fb_id, 0);
+	modifiers[1] = modifiers[0] = DRM_FORMAT_MOD_BROADCOM_SAND64_COL_HEIGHT(dev->mode.height);
+	ret = drmModeAddFB2WithModifiers(dev->fd, dev->mode.width, dev->mode.height,
+			    pipes[0].fourcc, handles, pitches, offsets, modifiers, &fb_id, DRM_MODE_FB_MODIFIERS);
 	if (ret) {
 		fprintf(stderr, "failed to add fb (%ux%u): %s\n",
 			dev->mode.width, dev->mode.height, strerror(errno));

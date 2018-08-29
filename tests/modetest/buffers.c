@@ -70,9 +70,8 @@ bo_create_dumb(int fd, unsigned int width, unsigned int height, unsigned int bpp
 	}
 
 	memset(&arg, 0, sizeof(arg));
-	width = (width + 31) & ~31;
-	height = (height + 31) & ~31;
-	arg.size = width * height * 4;
+	width = (width + 63) & ~63;
+	arg.size = width * height * 2;
 
 	ret = drmIoctl(fd, DRM_IOCTL_VC4_CREATE_BO, &arg);
 	if (ret) {
@@ -82,8 +81,9 @@ bo_create_dumb(int fd, unsigned int width, unsigned int height, unsigned int bpp
 		return NULL;
 	}
 
+	/*
 	tiling.handle = arg.handle;
-	tiling.modifier = DRM_FORMAT_MOD_BROADCOM_VC4_T_TILED;
+	tiling.modifier = DRM_FORMAT_MOD_BROADCOM_SAND64;
 	ret = drmIoctl(fd, DRM_IOCTL_VC4_SET_TILING, &tiling);
 	if (ret) {
 		fprintf(stderr, "failed to set tiling modifier: %s\n",
@@ -91,10 +91,11 @@ bo_create_dumb(int fd, unsigned int width, unsigned int height, unsigned int bpp
 		free(bo);
 		return NULL;
 	}
+	*/
 	bo->fd = fd;
 	bo->handle = arg.handle;
 	bo->size = arg.size;
-	bo->pitch = ((width / 32) * 4096) / 32;
+	bo->pitch = width;
 
 	printf("%s:%i width %d height %d, size %d, pitch %d\n", __func__, __LINE__, width, height, bo->size, bo->pitch);
 
@@ -119,6 +120,7 @@ static int bo_map(struct bo *bo, void **out)
 	if (map == MAP_FAILED)
 		return -EINVAL;
 
+	memset(map, 0, bo->size);
 	bo->ptr = map;
 	*out = map;
 
@@ -332,7 +334,8 @@ bo_create(int fd, unsigned int format,
 		break;
 	}
 
-	util_fill_pattern(format, pattern, planes, width, height, pitches[0]);
+
+	util_fill_pattern(format, pattern, planes, width, height, height * 64);
 	bo_unmap(bo);
 
 	return bo;

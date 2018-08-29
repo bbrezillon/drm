@@ -69,6 +69,51 @@ struct color_yuv {
 #define MAKE_RGB24(rgb, r, g, b) \
 	{ .value = MAKE_RGBA(rgb, r, g, b, 0) }
 
+uint8_t *yfilled;
+
+static void set_planar_y_pix_val(void *ymem, unsigned int x, unsigned int y,
+				 unsigned int stride, uint8_t yval)
+{
+	unsigned int offs;
+	uint8_t *pix;
+
+	offs = (x / 64) * stride;
+	offs += y * 64;
+	offs += x % 64;
+//	printf("%s:%i pos %d:%d offs %x\n", __func__, __LINE__, x, y, offs);
+	pix = ymem + offs;
+	/*
+	if (yfilled[offs])
+		printf("%s:%i pos %d:%d offs %x already filled\n",
+		       __func__, __LINE__, x, y, offs);
+	*/
+	yfilled[offs] = 1;
+	*pix = yval;
+}
+
+static void set_planar_uv_pix_val(void *uvmem, unsigned int x, unsigned int y,
+				 unsigned int stride, unsigned int hsubsample,
+				 unsigned int vsubsample, uint8_t uval,
+				 uint8_t vval)
+{
+	unsigned int offs;
+	uint8_t *pix;
+
+//	printf("%s:%i stride %d\n", __func__, __LINE__, stride);
+//	h = (h + 63) & ~63;
+//	return;
+	offs = ((x / hsubsample) / 32) * (stride / 2);
+	offs += (y / vsubsample) * 64;
+	offs += ((x / hsubsample) % 32) * 2;
+//	offs *= 2;
+//	printf("%s:%i uvmem = %p pos %d:%d offs %x hsubsample %d vsubsample %d\n", __func__, __LINE__, uvmem, x, y, offs, hsubsample, vsubsample);
+	pix = uvmem + offs;
+	pix[0] = uval;
+	pix[1] = vval;
+//	pix[0] = 0;
+//	pix[1] = 0;
+}
+
 static void fill_smpte_yuv_planar(const struct util_yuv_info *yuv,
 				  unsigned char *y_mem, unsigned char *u_mem,
 				  unsigned char *v_mem, unsigned int width,
@@ -107,69 +152,79 @@ static void fill_smpte_yuv_planar(const struct util_yuv_info *yuv,
 	unsigned int ysub = yuv->ysub;
 	unsigned int x;
 	unsigned int y;
+	unsigned int i;
+
+	printf("%s:%i stride = %d ymem %p umem %p vmem %p\n",
+	       __func__, __LINE__, stride, y_mem, u_mem, v_mem);
+
+	yfilled = calloc(1, height * width);
 
 	/* Luma */
 	for (y = 0; y < height * 6 / 9; ++y) {
 		for (x = 0; x < width; ++x)
-			y_mem[x] = colors_top[x * 7 / width].y;
-		y_mem += stride;
+			set_planar_y_pix_val(y_mem, x, y, stride,
+					     colors_top[x * 7 / width].y);
 	}
 
 	for (; y < height * 7 / 9; ++y) {
 		for (x = 0; x < width; ++x)
-			y_mem[x] = colors_middle[x * 7 / width].y;
-		y_mem += stride;
+			set_planar_y_pix_val(y_mem, x, y, stride,
+					     colors_middle[x * 7 / width].y);
 	}
 
 	for (; y < height; ++y) {
 		for (x = 0; x < width * 5 / 7; ++x)
-			y_mem[x] = colors_bottom[x * 4 / (width * 5 / 7)].y;
+			set_planar_y_pix_val(y_mem, x, y, stride,
+				colors_bottom[x * 4 / (width * 5 / 7)].y);
 		for (; x < width * 6 / 7; ++x)
-			y_mem[x] = colors_bottom[(x - width * 5 / 7) * 3
-						 / (width / 7) + 4].y;
+			set_planar_y_pix_val(y_mem, x, y, stride,
+				colors_bottom[(x - width * 5 / 7) * 3 / (width / 7) + 4].y);
 		for (; x < width; ++x)
-			y_mem[x] = colors_bottom[7].y;
-		y_mem += stride;
+			set_planar_y_pix_val(y_mem, x, y, stride, colors_bottom[7].y);
 	}
+
+	/*
+	for (i = 0; i < height * width; i++) {
+		if (!yfilled[i])
+			printf("%s:%i y[%d] not filled\n", __func__, __LINE__, i);
+	}
+	*/
+
+	printf("%s:%i y all filled\n", __func__, __LINE__);
 
 	/* Chroma */
 	for (y = 0; y < height / ysub * 6 / 9; ++y) {
 		for (x = 0; x < width; x += xsub) {
-			u_mem[x*cs/xsub] = colors_top[x * 7 / width].u;
-			v_mem[x*cs/xsub] = colors_top[x * 7 / width].v;
+			set_planar_uv_pix_val(u_mem, x, y * ysub, stride, xsub, ysub,
+				colors_top[x * 7 / width].u,
+				colors_top[x * 7 / width].v);
 		}
-		u_mem += stride * cs / xsub;
-		v_mem += stride * cs / xsub;
 	}
 
 	for (; y < height / ysub * 7 / 9; ++y) {
 		for (x = 0; x < width; x += xsub) {
-			u_mem[x*cs/xsub] = colors_middle[x * 7 / width].u;
-			v_mem[x*cs/xsub] = colors_middle[x * 7 / width].v;
+			set_planar_uv_pix_val(u_mem, x, y * ysub, stride, xsub, ysub,
+				colors_middle[x * 7 / width].u,
+				colors_middle[x * 7 / width].v);
 		}
-		u_mem += stride * cs / xsub;
-		v_mem += stride * cs / xsub;
 	}
 
 	for (; y < height / ysub; ++y) {
 		for (x = 0; x < width * 5 / 7; x += xsub) {
-			u_mem[x*cs/xsub] =
-				colors_bottom[x * 4 / (width * 5 / 7)].u;
-			v_mem[x*cs/xsub] =
-				colors_bottom[x * 4 / (width * 5 / 7)].v;
+			set_planar_uv_pix_val(u_mem, x, y * ysub, stride, xsub, ysub,
+				colors_bottom[x * 4 / (width * 5 / 7)].u,
+				colors_bottom[x * 4 / (width * 5 / 7)].v);
 		}
 		for (; x < width * 6 / 7; x += xsub) {
-			u_mem[x*cs/xsub] = colors_bottom[(x - width * 5 / 7) *
-							 3 / (width / 7) + 4].u;
-			v_mem[x*cs/xsub] = colors_bottom[(x - width * 5 / 7) *
-							 3 / (width / 7) + 4].v;
+			set_planar_uv_pix_val(u_mem, x, y * ysub, stride, xsub, ysub,
+				colors_bottom[(x - width * 5 / 7) * 3 / (width / 7) + 4].u,
+				colors_bottom[(x - width * 5 / 7) * 3 / (width / 7) + 4].v);
 		}
 		for (; x < width; x += xsub) {
-			u_mem[x*cs/xsub] = colors_bottom[7].u;
-			v_mem[x*cs/xsub] = colors_bottom[7].v;
+			set_planar_uv_pix_val(u_mem, x, y * ysub, stride, xsub, ysub,
+				colors_bottom[7].u,
+				colors_bottom[7].v);
 		}
-		u_mem += stride * cs / xsub;
-		v_mem += stride * cs / xsub;
 	}
 }
 
@@ -685,15 +740,8 @@ static void fill_tiles_yuv_planar(const struct util_format_info *info,
 				MAKE_YUV_601((rgb32 >> 16) & 0xff,
 					     (rgb32 >> 8) & 0xff, rgb32 & 0xff);
 
-			y_mem[x] = color.y;
-			u_mem[x/xsub*cs] = color.u;
-			v_mem[x/xsub*cs] = color.v;
-		}
-
-		y_mem += stride;
-		if ((y + 1) % ysub == 0) {
-			u_mem += stride * cs / xsub;
-			v_mem += stride * cs / xsub;
+			set_planar_y_pix_val(y_mem, x, y, stride, color.y);
+			set_planar_uv_pix_val(u_mem, x, y, stride, xsub, ysub, color.u, color.v);
 		}
 	}
 }
